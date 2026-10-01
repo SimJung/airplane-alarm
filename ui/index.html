@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>항공권 감시</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1d2129; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #03c75a; --accent-ink: #fff; --danger: #e5484d; --new: #fff7d6; --new-ink: #8a6100;
+    --chip: #f0f1f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111316; --card: #1b1e23; --text: #e8eaed; --muted: #9aa0a6; --line: #2c3036;
+      --accent: #1ed072; --accent-ink: #0b1a10; --danger: #ff6b6f; --new: #3a3010; --new-ink: #ffd666;
+      --chip: #262a30;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", sans-serif; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; flex: 1; }
+  .meta { color: var(--muted); font-size: 13px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  button.ghost { border-color: transparent; background: transparent; }
+  input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 8px; width: 100%; }
+  input[type=checkbox] { width: auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+  .card.off { opacity: .55; }
+  .card-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; flex-wrap: wrap; }
+  .route { font-size: 17px; font-weight: 700; }
+  .card-head .title { flex: 1; min-width: 200px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .switch { position: relative; width: 38px; height: 22px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 22px; cursor: pointer; transition: .15s; }
+  .switch span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::before { transform: translateX(16px); }
+  form.edit { border-top: 1px solid var(--line); padding: 16px; display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  form.edit label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  form.edit .full { grid-column: 1 / -1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 4px 10px; border-radius: 999px; background: var(--chip); border: 1px solid transparent;
+    cursor: pointer; font-size: 13px; color: var(--text); user-select: none; }
+  .chip.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .actions { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; }
+  .err { color: var(--danger); font-size: 13px; }
+  .results { border-top: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 8px 16px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  tr.new td { background: var(--new); color: var(--new-ink); }
+  td.price { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .empty { padding: 14px 16px; color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  h2 { font-size: 15px; margin: 32px 0 10px; }
+  .log { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 4px 0; }
+  .log div { padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .log div:last-child { border-bottom: 0; }
+  .add { width: 100%; padding: 12px; border-style: dashed; color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>✈️ 항공권 감시</h1>
+    <span class="meta" id="next"></span>
+    <label class="meta" style="display:flex;align-items:center;gap:6px">조회 간격
+      <select id="interval" style="width:auto">
+        <option value="30">30초</option><option value="60">1분</option><option value="120">2분</option>
+        <option value="300">5분</option><option value="600">10분</option>
+      </select>
+    </label>
+    <button id="checkNow">지금 조회</button>
+  </header>
+
+  <div id="watches"></div>
+  <button class="add" id="add">+ 감시 추가</button>
+
+  <h2>알림 기록</h2>
+  <div class="log" id="log"><div class="sub">아직 알림이 없어요.</div></div>
+</div>
+
+<script>
+const AIRPORTS = { GMP: "김포", CJU: "제주", PUS: "김해(부산)", TAE: "대구", CJJ: "청주", KWJ: "광주",
+  RSU: "여수", USN: "울산", MWX: "무안", KPO: "포항경주", HIN: "사천", YNY: "양양", WJU: "원주",
+  KUV: "군산", ICN: "인천" };
+const AIRLINES = { KE: "대한항공", OZ: "아시아나", "7C": "제주항공", LJ: "진에어", TW: "티웨이/트리니티",
+  ZE: "이스타", BX: "에어부산", RS: "에어서울", RF: "에어로케이", WE: "파라타" };
+
+let state = null;          // 서버에서 받은 최신 상태
+const editing = new Map(); // watch id -> 편집 중인 사본 (폴링으로 덮어쓰지 않음)
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const hm = t => t ? `${t.slice(0, 2)}:${t.slice(2)}` : "";
+const won = n => n.toLocaleString("ko-KR") + "원";
+const dateLabel = d => { const x = new Date(d + "T00:00:00"); return `${x.getMonth() + 1}/${x.getDate()}(${"일월화수목금토"[x.getDay()]})`; };
+const timeOf = iso => iso ? iso.slice(11, 19) : "";
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function saveConfig(cfg) {
+  await api("/api/config", cfg);
+  await refresh();
+}
+
+function condSummary(w) {
+  const p = [];
+  if (w.depart_after || w.depart_before) p.push(`${hm((w.depart_after || "").replace(":", "")) || "~"}–${hm((w.depart_before || "").replace(":", "")) || "~"} 출발`);
+  if (w.airlines.length) p.push(w.airlines.map(a => AIRLINES[a] || a).join("·"));
+  if (w.flight_numbers.length) p.push(w.flight_numbers.join(", "));
+  if (w.max_price) p.push(`${won(w.max_price)} 이하`);
+  if (w.adults > 1) p.push(`성인 ${w.adults}`);
+  return p.length ? p.join(" · ") : "조건 없음 (모든 편)";
+}
+
+function airportOptions(sel) {
+  return Object.entries(AIRPORTS).map(([c, n]) => `<option value="${c}" ${c === sel ? "selected" : ""}>${n} (${c})</option>`).join("");
+}
+
+function renderEditForm(id, w) {
+  return `<form class="edit" data-id="${id}">
+    <label class="full">이름 (선택)<input name="name" value="${esc(w.name)}" placeholder="예: 가는 편"></label>
+    <label>출발<select name="from">${airportOptions(w.from)}</select></label>
+    <label>도착<select name="to">${airportOptions(w.to)}</select></label>
+    <label>날짜<input type="date" name="date" value="${esc(w.date)}" required></label>
+    <label>성인 인원<input type="number" name="adults" min="1" max="9" value="${w.adults}"></label>
+    <label>출발 시각 이후<input type="time" name="depart_after" value="${esc(w.depart_after || "")}"></label>
+    <label>출발 시각 이전<input type="time" name="depart_before" value="${esc(w.depart_before || "")}"></label>
+    <label>최대 가격 (원)<input type="number" name="max_price" min="0" step="1000" value="${w.max_price ?? ""}" placeholder="제한 없음"></label>
+    <label class="full">항공사 (선택 안 하면 전체)
+      <div class="chips">${Object.entries(AIRLINES).map(([c, n]) =>
+        `<span class="chip ${w.airlines.includes(c) ? "on" : ""}" data-airline="${c}">${n}</span>`).join("")}</div>
+    </label>
+    <label class="full">편명 (쉼표로 구분, 선택)<input name="flight_numbers" value="${esc(w.flight_numbers.join(", "))}" placeholder="예: 7C141, KE1165"></label>
+    <div class="actions"><span class="err" data-err></span>
+      <button type="button" data-cancel>취소</button><button type="submit" class="primary">저장</button></div>
+  </form>`;
+}
+
+function renderResults(w, st) {
+  if (!w.enabled) return `<div class="results"><div class="empty">감시 꺼짐</div></div>`;
+  if (!st) return `<div class="results"><div class="empty">조회 대기 중…</div></div>`;
+  const err = st.error ? `<div class="empty err">조회 실패: ${esc(st.error)}</div>` : "";
+  if (!st.flights || !st.flights.length) return `<div class="results">${err}<div class="empty">조건에 맞는 항공편이 아직 없어요.</div></div>`;
+  return `<div class="results">${err}<div class="scroll"><table>
+    <tr><th>출발</th><th>도착</th><th>항공사</th><th>편명</th><th>좌석</th><th>잔여</th><th style="text-align:right">최저가</th></tr>
+    ${st.flights.map(f => `<tr class="${f.new ? "new" : ""}">
+      <td><b>${hm(f.dep)}</b></td><td>${hm(f.arr)}</td><td>${esc(f.airline)}</td><td>${esc(f.flight)}</td>
+      <td>${esc(f.seat_class)}</td><td>${f.seats ?? "-"}석</td><td class="price">${f.new ? "🔔 " : ""}${won(f.price)}</td></tr>`).join("")}
+  </table></div></div>`;
+}
+
+function naverUrl(w) {
+  return `https://flight.naver.com/flights/domestic/${w.from}-${w.to}-${w.date.replaceAll("-", "")}?adult=${w.adults}&fareType=YC`;
+}
+
+function render() {
+  if (!state) return;
+  const { config, status } = state;
+  const list = config.watches.map(w => w);
+  // 새로 추가 중인 항목(아직 저장 안 됨)도 표시
+  for (const [id, w] of editing) if (id.startsWith("new-")) list.push({ ...w, id });
+
+  $("#watches").innerHTML = list.map(w => {
+    const isNew = w.id.startsWith("new-");
+    const ed = editing.get(w.id);
+    const st = status[w.id];
+    const count = st?.flights ? `${st.flights.length}편` : "";
+    return `<div class="card ${w.enabled ? "" : "off"}" data-id="${w.id}">
+      <div class="card-head">
+        ${isNew ? "" : `<label class="switch" title="감시 켜기/끄기"><input type="checkbox" data-toggle ${w.enabled ? "checked" : ""}><span></span></label>`}
+        <div class="title">
+          <div class="route">${esc(w.name) ? esc(w.name) + " · " : ""}${AIRPORTS[w.from] || w.from} → ${AIRPORTS[w.to] || w.to}
+            <span class="sub">${w.date ? dateLabel(w.date) : ""} ${count}</span></div>
+          <div class="sub">${esc(condSummary(w))}${st?.checked_at ? ` · ${timeOf(st.checked_at)} 조회` : ""}</div>
+        </div>
+        ${isNew ? "" : `<a href="${naverUrl(w)}" target="_blank" rel="noopener">네이버에서 보기</a>
+          ${ed ? "" : `<button data-edit>편집</button>`}
+          <button class="danger ghost" data-delete>삭제</button>`}
+      </div>
+      ${ed ? renderEditForm(w.id, ed) : ""}
+      ${isNew ? "" : renderResults(w, st)}
+    </div>`;
+  }).join("") || `<div class="card"><div class="empty">감시 중인 항공권이 없어요. 아래에서 추가하세요.</div></div>`;
+
+  $("#log").innerHTML = state.alerts.length
+    ? state.alerts.map(a => `<div><span class="sub">${a.at.slice(5, 10).replace("-", "/")} ${timeOf(a.at)}</span> · <b>${esc(a.watch)}</b> · ${esc(a.text)}</div>`).join("")
+    : `<div class="sub">아직 알림이 없어요.</div>`;
+
+  $("#next").textContent = state.next_check_at ? `다음 조회 ${timeOf(state.next_check_at)}` : "조회 중…";
+  if (document.activeElement !== $("#interval")) $("#interval").value = String(config.interval_seconds);
+}
+
+async function refresh() {
+  state = await api("/api/state");
+  render();
+}
+
+function readForm(form, base) {
+  const fd = new FormData(form);
+  return {
+    ...base,
+    name: fd.get("name").trim(),
+    from: fd.get("from"), to: fd.get("to"), date: fd.get("date"),
+    adults: Number(fd.get("adults") || 1),
+    depart_after: fd.get("depart_after") || null, depart_before: fd.get("depart_before") || null,
+    max_price: fd.get("max_price") ? Number(fd.get("max_price")) : null,
+    airlines: [...form.querySelectorAll(".chip.on")].map(c => c.dataset.airline),
+    flight_numbers: fd.get("flight_numbers").split(",").map(s => s.trim()).filter(Boolean),
+  };
+}
+
+$("#watches").addEventListener("click", async e => {
+  const card = e.target.closest(".card");
+  if (!card) return;
+  const id = card.dataset.id;
+  const w = state.config.watches.find(x => x.id === id);
+  if (e.target.matches("[data-edit]")) { editing.set(id, structuredClone(w)); render(); }
+  else if (e.target.matches("[data-cancel]")) { editing.delete(id); render(); }
+  else if (e.target.matches(".chip")) {
+    // 편집 중인 다른 입력값이 날아가지 않도록 DOM에서 바로 토글
+    e.target.classList.toggle("on");
+  }
+  else if (e.target.matches("[data-delete]")) {
+    if (!confirm(`'${w.name || `${w.from}→${w.to} ${w.date}`}' 감시를 삭제할까요?`)) return;
+    editing.delete(id);
+    await saveConfig({ ...state.config, watches: state.config.watches.filter(x => x.id !== id) });
+  }
+});
+
+$("#watches").addEventListener("change", async e => {
+  if (!e.target.matches("[data-toggle]")) return;
+  const id = e.target.closest(".card").dataset.id;
+  await saveConfig({ ...state.config, watches: state.config.watches.map(x => x.id === id ? { ...x, enabled: e.target.checked } : x) });
+});
+
+$("#watches").addEventListener("submit", async e => {
+  e.preventDefault();
+  const form = e.target, id = form.dataset.id;
+  const base = editing.get(id);
+  const w = readForm(form, base);
+  const watches = id.startsWith("new-")
+    ? [...state.config.watches, (({ id: _, ...rest }) => rest)(w)]
+    : state.config.watches.map(x => x.id === id ? w : x);
+  try {
+    await api("/api/config", { ...state.config, watches });
+    editing.delete(id);
+    await refresh();
+  } catch (err) {
+    $("[data-err]", form).textContent = err.message;
+  }
+});
+
+$("#add").addEventListener("click", () => {
+  const last = state.config.watches.at(-1);
+  const id = "new-" + Date.now();
+  editing.set(id, { enabled: true, name: "", from: last?.to || "GMP", to: last?.from || "CJU",
+    date: last?.date || new Date().toISOString().slice(0, 10), adults: last?.adults || 1,
+    airlines: [], flight_numbers: [], depart_after: null, depart_before: null, max_price: null });
+  render();
+  document.querySelector(`[data-id="${id}"]`)?.scrollIntoView({ behavior: "smooth" });
+});
+
+$("#interval").addEventListener("change", e => saveConfig({ ...state.config, interval_seconds: Number(e.target.value) }));
+$("#checkNow").addEventListener("click", async () => { await api("/api/check", {}); setTimeout(refresh, 3000); });
+
+// 편집 폼 입력 중에 폴링이 폼을 다시 그리면 커서가 날아가므로, 편집 중이면 결과만 갱신하지 않고 건너뛴다
+setInterval(() => { if (!document.querySelector("form.edit")) refresh(); }, 3000);
+refresh();
+</script>
+</body>
+</html>

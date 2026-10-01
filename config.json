@@ -1,0 +1,33 @@
+{
+  "interval_seconds": 30,
+  "watches": [
+    {
+      "enabled": true,
+      "name": "가는 편",
+      "from": "GMP",
+      "to": "CJU",
+      "date": "2026-10-03",
+      "adults": 2,
+      "airlines": [],
+      "flight_numbers": [],
+      "depart_after": null,
+      "depart_before": "16:00",
+      "max_price": null,
+      "id": "1deef5d0"
+    },
+    {
+      "enabled": true,
+      "name": "오는 편",
+      "from": "CJU",
+      "to": "GMP",
+      "date": "2026-10-05",
+      "adults": 1,
+      "airlines": [],
+      "flight_numbers": [],
+      "depart_after": null,
+      "depart_before": null,
+      "max_price": null,
+      "id": "9f20b709"
+    }
+  ]
+}
