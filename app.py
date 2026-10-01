@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""네이버 항공권 감시기 - 웹 UI 버전.
+"""국내선 항공권 감시기 (네이버 항공권 + 여기어때) - 웹 UI 버전.
 
 감시 스레드와 설정 UI 서버를 한 프로세스에서 띄운다.
 사용법: python3 app.py [--port 8765]  →  http://localhost:8765
@@ -11,11 +11,12 @@ import threading
 import uuid
 import webbrowser
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from watch import AIRLINE_NAMES, SEAT_CLASS, alarm, best_by_flight, describe, fetch_flights, matches, page_url
+from watch import AIRLINE_NAMES, SEAT_CLASS, SOURCES, alarm, describe, search
 
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config.json"
@@ -29,7 +30,7 @@ WATCH_DEFAULTS = {
 
 
 def normalize_config(cfg):
-    out = {"interval_seconds": max(30, int(cfg.get("interval_seconds") or 60)), "watches": []}
+    out = {"interval_seconds": max(10, int(cfg.get("interval_seconds") or 60)), "watches": []}
     for w in cfg.get("watches", []):
         w = {**WATCH_DEFAULTS, **w}
         w.pop("min_seats", None)  # 예전 설정 파일 호환
@@ -55,6 +56,7 @@ def flight_info(f, is_new):
         "airline": AIRLINE_NAMES.get(code, code), "flight": f"{code}{seg['flightNumber']}",
         "seat_class": SEAT_CLASS.get(f.get("seatClass"), f.get("seatClass")),
         "price": f["minFare"], "seats": f.get("seatCount"), "new": is_new,
+        "prices": f["prices"], "source": f["source"],
     }
 
 
@@ -83,7 +85,7 @@ class Watcher:
         with self.lock:
             return {
                 "config": self.config,
-                "status": {k: {kk: vv for kk, vv in v.items() if kk not in ("fp", "prices")}
+                "status": {k: {kk: vv for kk, vv in v.items() if kk not in ("fp", "prices", "by_source", "ok_sources")}
                            for k, v in self.status.items()},
                 "alerts": list(self.alerts),
                 "next_check_at": self.next_check_at,
@@ -93,32 +95,40 @@ class Watcher:
         # 조건이 바뀌면 처음 조회처럼 취급해서 기존 편들로 알림이 쏟아지지 않게 한다
         fp = json.dumps({k: v for k, v in w.items() if k not in ("name", "enabled")}, sort_keys=True)
         now = datetime.now().isoformat(timespec="seconds")
-        try:
-            best = best_by_flight(f for f in fetch_flights(w) if matches(f, w))
-        except Exception as e:
-            with self.lock:
-                self.status.setdefault(w["id"], {})
-                self.status[w["id"]].update(checked_at=now, error=str(e))
-            return
         with self.lock:
             prev = self.status.get(w["id"], {})
-            first = prev.get("fp") != fp
-            prices = {} if first else prev.get("prices", {})
-            changed = [k for k, f in best.items() if not first and (k not in prices or f["minFare"] < prices[k])]
-            ordered = sorted(best.items(), key=lambda kv: kv[1]["segment"]["departure"]["time"])
+        first = prev.get("fp") != fp
+        merged, by_source, errors, partial = search(w, None if first else prev.get("by_source"))
+        error = " / ".join(f"{SOURCES[s]['label']}: {e}" for s, e in {**partial, **errors}.items()) or None
+        if len(errors) == len(SOURCES):
+            with self.lock:
+                self.status.setdefault(w["id"], {})
+                self.status[w["id"]].update(checked_at=now, error=error)
+            return
+
+        # 이번에 처음 성공한 사이트가 있으면 그 사이트 결과는 기준값으로만 쓰고 알림은 생략한다
+        ok_sources = (set() if first else set(prev.get("ok_sources", ()))) | (set(SOURCES) - set(errors))
+        baseline = first or not ok_sources.issubset(prev.get("ok_sources", ()))
+        prices = {} if first else prev.get("prices", {})
+        changed = [] if baseline else [
+            k for k, f in merged.items() if k not in prices or f["minFare"] < prices[k]
+        ]
+        ordered = sorted(merged.items(), key=lambda kv: kv[1]["segment"]["departure"]["time"])
+        label = w["name"] or f"{w['from']}→{w['to']} {w['date'][5:]}"
+        with self.lock:
             self.status[w["id"]] = {
-                "fp": fp, "prices": {k: f["minFare"] for k, f in best.items()},
+                "fp": fp, "by_source": by_source, "ok_sources": sorted(ok_sources),
+                "prices": {k: f["minFare"] for k, f in merged.items()},
                 "flights": [flight_info(f, k in changed) for k, f in ordered],
-                "checked_at": now, "error": None,
+                "checked_at": now, "error": error,
             }
-            label = w["name"] or f"{w['from']}→{w['to']} {w['date'][5:]}"
             for k in changed:
-                self.alerts.appendleft({"at": now, "watch": label, "text": describe(best[k])})
+                self.alerts.appendleft({"at": now, "watch": label, "text": describe(merged[k])})
         if changed:
-            changed.sort(key=lambda k: best[k]["segment"]["departure"]["time"])
-            alarm(f"✈️ {label} 새 항공권 {len(changed)}편!", [describe(best[k]) for k in changed], page_url(w))
-        elif first and best:
-            alarm(f"✈️ {label} {len(best)}편 있음", [describe(f) for _, f in ordered], page_url(w))
+            changed.sort(key=lambda k: merged[k]["segment"]["departure"]["time"])
+            alarm(f"✈️ {label} 새 항공권 {len(changed)}편!", [merged[k] for k in changed], w)
+        elif first and merged:
+            alarm(f"✈️ {label} {len(merged)}편 있음", [f for _, f in ordered], w)
 
     def run(self):
         while True:
@@ -126,8 +136,9 @@ class Watcher:
             with self.lock:
                 watches = [dict(w) for w in self.config["watches"] if w["enabled"]]
                 interval = self.config["interval_seconds"]
-            for w in watches:
-                self.check_one(w)
+            # 항목별 조회가 수 초씩 걸려서 동시에 돌린다
+            with ThreadPoolExecutor(max_workers=max(1, len(watches))) as ex:
+                list(ex.map(self.check_one, watches))
             wait = interval + random.uniform(0, interval * 0.2)
             with self.lock:
                 self.next_check_at = datetime.fromtimestamp(datetime.now().timestamp() + wait).isoformat(timespec="seconds")

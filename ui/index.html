@@ -62,7 +62,10 @@
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
   tr:last-child td { border-bottom: 0; }
   tr.new td { background: var(--new); color: var(--new-ink); }
-  td.price { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  td.price, th.price { text-align: right; font-variant-numeric: tabular-nums; }
+  td.price { color: var(--muted); }
+  td.price.best { color: var(--text); font-weight: 700; }
+  .links { display: flex; gap: 10px; }
   .empty { padding: 14px 16px; color: var(--muted); }
   .scroll { overflow-x: auto; }
   h2 { font-size: 15px; margin: 32px 0 10px; }
@@ -80,7 +83,7 @@
     <span class="meta" id="next"></span>
     <label class="meta" style="display:flex;align-items:center;gap:6px">조회 간격
       <select id="interval" style="width:auto">
-        <option value="30">30초</option><option value="60">1분</option><option value="120">2분</option>
+        <option value="10">10초</option><option value="20">20초</option><option value="30">30초</option><option value="60">1분</option><option value="120">2분</option>
         <option value="300">5분</option><option value="600">10분</option>
       </select>
     </label>
@@ -98,6 +101,7 @@
 const AIRPORTS = { GMP: "김포", CJU: "제주", PUS: "김해(부산)", TAE: "대구", CJJ: "청주", KWJ: "광주",
   RSU: "여수", USN: "울산", MWX: "무안", KPO: "포항경주", HIN: "사천", YNY: "양양", WJU: "원주",
   KUV: "군산", ICN: "인천" };
+const SOURCES = { naver: "네이버", yeogi: "여기어때" };
 const AIRLINES = { KE: "대한항공", OZ: "아시아나", "7C": "제주항공", LJ: "진에어", TW: "티웨이/트리니티",
   ZE: "이스타", BX: "에어부산", RS: "에어서울", RF: "에어로케이", WE: "파라타" };
 
@@ -160,14 +164,26 @@ function renderEditForm(id, w) {
 function renderResults(w, st) {
   if (!w.enabled) return `<div class="results"><div class="empty">감시 꺼짐</div></div>`;
   if (!st) return `<div class="results"><div class="empty">조회 대기 중…</div></div>`;
-  const err = st.error ? `<div class="empty err">조회 실패: ${esc(st.error)}</div>` : "";
+  const err = st.error ? `<div class="empty err">⚠️ ${esc(st.error)}</div>` : "";
   if (!st.flights || !st.flights.length) return `<div class="results">${err}<div class="empty">조건에 맞는 항공편이 아직 없어요.</div></div>`;
   return `<div class="results">${err}<div class="scroll"><table>
-    <tr><th>출발</th><th>도착</th><th>항공사</th><th>편명</th><th>좌석</th><th>잔여</th><th style="text-align:right">최저가</th></tr>
+    <tr><th>출발</th><th>도착</th><th>항공사</th><th>편명</th><th>좌석</th><th>잔여</th>${Object.values(SOURCES).map(n => `<th class="price">${n}</th>`).join("")}</tr>
     ${st.flights.map(f => `<tr class="${f.new ? "new" : ""}">
       <td><b>${hm(f.dep)}</b></td><td>${hm(f.arr)}</td><td>${esc(f.airline)}</td><td>${esc(f.flight)}</td>
-      <td>${esc(f.seat_class)}</td><td>${f.seats ?? "-"}석</td><td class="price">${f.new ? "🔔 " : ""}${won(f.price)}</td></tr>`).join("")}
+      <td>${esc(f.seat_class)}</td><td>${f.seats ?? "-"}석</td>${Object.keys(SOURCES).map(s => {
+        const p = f.prices[s];
+        if (p == null) return `<td class="price">-</td>`;
+        const best = s === f.source;
+        return `<td class="price ${best ? "best" : ""}">${best && f.new ? "🔔 " : ""}${won(p)}</td>`;
+      }).join("")}</tr>`).join("")}
   </table></div></div>`;
+}
+
+function yeogiUrl(w) {
+  const q = new URLSearchParams({ departureAirportCode: w.from, arrivalAirportCode: w.to,
+    startDate: w.date.replaceAll("-", ""), adultCount: w.adults, childCount: 0, infantCount: 0,
+    seatType: "SALE;NOTY;Y;C", tripType: "OW" });
+  return `https://www.yeogi.com/flight/domestic/srp?${q}`;
 }
 
 function naverUrl(w) {
@@ -194,7 +210,8 @@ function render() {
             <span class="sub">${w.date ? dateLabel(w.date) : ""} ${count}</span></div>
           <div class="sub">${esc(condSummary(w))}${st?.checked_at ? ` · ${timeOf(st.checked_at)} 조회` : ""}</div>
         </div>
-        ${isNew ? "" : `<a href="${naverUrl(w)}" target="_blank" rel="noopener">네이버에서 보기</a>
+        ${isNew ? "" : `<span class="links"><a href="${naverUrl(w)}" target="_blank" rel="noopener">네이버</a>
+          <a href="${yeogiUrl(w)}" target="_blank" rel="noopener">여기어때</a></span>
           ${ed ? "" : `<button data-edit>편집</button>`}
           <button class="danger ghost" data-delete>삭제</button>`}
       </div>
