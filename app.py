@@ -3,10 +3,12 @@
 
 감시 스레드와 설정 UI 서버를 한 프로세스에서 띄운다.
 사용법: python3 app.py [--port 8765]  →  http://localhost:8765
+      (윈도우: start.bat 실행 또는 python app.py)
 """
 import argparse
 import json
 import random
+import sys
 import threading
 import uuid
 import webbrowser
@@ -64,14 +66,14 @@ class Watcher:
     def __init__(self):
         self.lock = threading.Lock()
         self.wake = threading.Event()
-        self.config = normalize_config(json.loads(CONFIG_PATH.read_text()))
+        self.config = normalize_config(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
         self._save()  # id 부여 결과 저장
         self.status = {}  # watch id -> {fp, prices, flights, checked_at, error}
         self.alerts = deque(maxlen=100)
         self.next_check_at = None
 
     def _save(self):
-        CONFIG_PATH.write_text(json.dumps(self.config, ensure_ascii=False, indent=2) + "\n")
+        CONFIG_PATH.write_text(json.dumps(self.config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     def set_config(self, cfg):
         cfg = normalize_config(cfg)
@@ -183,6 +185,8 @@ def make_handler(watcher):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true", help="브라우저 자동으로 열지 않기")

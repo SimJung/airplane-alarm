@@ -7,9 +7,6 @@ config.json 의 조건에 맞는 항공편이 새로 생기거나 더 싸지면 
 import argparse
 import json
 import random
-import shlex
-import shutil
-import subprocess
 import sys
 import time
 import urllib.error
@@ -18,6 +15,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+
+import notifier
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
@@ -282,20 +281,7 @@ def describe(f):
             + (f" · {where}" if where else ""))
 
 
-def notify(title, message, url):
-    print("\a", end="", flush=True)
-    if shutil.which("terminal-notifier"):
-        r = subprocess.run(["terminal-notifier", "-title", title, "-message", message,
-                            "-open", url, "-sound", "Glass"], capture_output=True)
-        if r.returncode == 0:
-            return
-    script = f'display notification {json.dumps(message, ensure_ascii=False)} with title {json.dumps(title, ensure_ascii=False)} sound name "Glass"'
-    subprocess.run(["osascript", "-e", script], capture_output=True)
-
-
-ALARM_SOUND = "/System/Library/Sounds/Sosumi.aiff"
 REOPEN_AFTER = 180  # 같은 페이지를 이 시간(초) 안에 또 열지 않음 - 탭이 계속 쌓이는 것 방지
-_popups = {}        # 감시 항목 -> 떠 있는 팝업 프로세스
 _opened_at = {}     # url -> 마지막으로 브라우저를 연 시각
 
 
@@ -305,40 +291,31 @@ def alarm(title, flights, w):
     # 알림에 나온 편을 가장 싸게 파는 사이트들의 페이지를 연다
     srcs = list(dict.fromkeys(f["source"] for f in flights))
     urls = {s: SOURCES[s]["url"](w) for s in srcs}
-    first_url = urls[srcs[0]]
 
-    notify(title, lines[0] + (f" 외 {len(lines) - 1}편" if len(lines) > 1 else ""), first_url)
-    subprocess.Popen(["sh", "-c", f"for i in 1 2 3; do afplay {ALARM_SOUND}; done"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    notifier.banner(title, lines[0] + (f" 외 {len(lines) - 1}편" if len(lines) > 1 else ""), urls[srcs[0]])
+    notifier.sound()
 
     now = time.time()
     for url in urls.values():
         if now - _opened_at.get(url, 0) > REOPEN_AFTER:
             _opened_at[url] = now
-            subprocess.run(["open", url])
+            notifier.open_url(url)
 
-    # 같은 감시 항목의 이전 팝업이 남아 있으면 최신 내용으로 교체
-    popup_key = (w["from"], w["to"], w["date"])
-    old = _popups.pop(popup_key, None)
-    if old and old.poll() is None:
-        old.terminate()
-    buttons = ["닫기"] + [SOURCES[s]["label"] for s in SOURCES]
-    script = (f"display alert {json.dumps(title, ensure_ascii=False)} "
-              f"message {json.dumps(chr(10).join(lines), ensure_ascii=False)} "
-              f"buttons {{{', '.join(json.dumps(b, ensure_ascii=False) for b in buttons)}}} "
-              f"default button {json.dumps(SOURCES[srcs[0]]['label'], ensure_ascii=False)} giving up after 3600")
-    cases = " ".join(f'*{shlex.quote(SOURCES[s]["label"])}*) open {shlex.quote(SOURCES[s]["url"](w))};;' for s in SOURCES)
-    _popups[popup_key] = subprocess.Popen(
-        ["sh", "-c", f'r=$(osascript -e {shlex.quote(script)}); case "$r" in {cases} esac'],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 팝업 버튼은 최저가 사이트를 맨 앞에 둔다
+    order = srcs + [s for s in SOURCES if s not in srcs]
+    notifier.popup(f"{w['from']}→{w['to']} {w['date']}", title, "\n".join(lines),
+                   [(SOURCES[s]["label"], SOURCES[s]["url"](w)) for s in order])
 
 
 def main():
+    # 윈도우 콘솔(cp949)에서 이모지 출력하다 죽지 않게
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(Path(__file__).with_name("config.json")))
     ap.add_argument("--once", action="store_true", help="한 번만 조회하고 종료")
     args = ap.parse_args()
-    cfg = json.loads(Path(args.config).read_text())
+    cfg = json.loads(Path(args.config).read_text(encoding="utf-8"))
     interval = cfg.get("interval_seconds", 60)
 
     state, first_run = {}, True  # name -> {"by_source": ..., "prices": {key: 최저가}}
